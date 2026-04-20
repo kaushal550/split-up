@@ -35,13 +35,23 @@ export default function GroupDetail() {
   const [addingMember, setAddingMember] = useState(false)
   const [memberError, setMemberError] = useState('')
   const [settlingIdx, setSettlingIdx] = useState(null)
+  const [settlements, setSettlements] = useState([])
 
   useEffect(() => { if (user && id) loadAll() }, [user, id])
 
   async function loadAll() {
     setLoading(true)
-    await Promise.all([loadGroup(), loadExpensesAndSplits()])
+    await Promise.all([loadGroup(), loadExpensesAndSplits(), loadSettlements()])
     setLoading(false)
+  }
+
+  async function loadSettlements() {
+    const { data } = await supabase
+      .from('settlements')
+      .select('*')
+      .eq('group_id', id)
+      .order('created_at', { ascending: false })
+    setSettlements(data ?? [])
   }
 
   async function loadGroup() {
@@ -174,12 +184,11 @@ export default function GroupDetail() {
     setSplits(prev => prev.map(s => s.id === splitId ? { ...s, settled: true } : s))
   }
 
-  async function settleTransaction(fromId, toId, idx) {
+  async function settleTransaction(fromId, toId, amount, idx) {
     setSettlingIdx(idx)
-    // Find all unsettled splits where fromId owes toId (toId paid the expense)
-    const expensesPaidByTo = expenses.filter(e => e.paid_by === toId).map(e => e.id)
+    const groupExpenseIds = expenses.map(e => e.id)
     const splitsToSettle = splits.filter(
-      s => s.user_id === fromId && expensesPaidByTo.includes(s.expense_id) && !s.settled
+      s => s.user_id === fromId && groupExpenseIds.includes(s.expense_id) && !s.settled
     )
     if (splitsToSettle.length > 0) {
       const ids = splitsToSettle.map(s => s.id)
@@ -188,6 +197,13 @@ export default function GroupDetail() {
         .in('id', ids)
       setSplits(prev => prev.map(s => ids.includes(s.id) ? { ...s, settled: true } : s))
     }
+    const { data: newSettlement } = await supabase.from('settlements').insert({
+      group_id: id,
+      from_user_id: fromId,
+      to_user_id: toId,
+      amount,
+    }).select().single()
+    if (newSettlement) setSettlements(prev => [newSettlement, ...prev])
     setSettlingIdx(null)
   }
 
@@ -382,7 +398,7 @@ export default function GroupDetail() {
                         <span className="font-bold text-gray-900 text-base">{formatINR(t.amount)}</span>
                         {isMe && (
                           <button
-                            onClick={() => settleTransaction(t.from, t.to, i)}
+                            onClick={() => settleTransaction(t.from, t.to, t.amount, i)}
                             disabled={settlingIdx === i}
                             className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-60 text-white rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
                           >
@@ -395,6 +411,39 @@ export default function GroupDetail() {
                 })}
               </div>
             </>
+          )}
+
+          {/* Settlement history */}
+          {settlements.length > 0 && (
+            <div className="mt-6">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Payment history</p>
+              <div className="space-y-2">
+                {settlements.map(s => {
+                  const from = profiles[s.from_user_id]
+                  const to = profiles[s.to_user_id]
+                  const fromName = from?.name ?? from?.email ?? 'Unknown'
+                  const toName = to?.name ?? to?.email ?? 'Unknown'
+                  const date = new Date(s.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+                  const isMe = s.from_user_id === user.id
+                  return (
+                    <div key={s.id} className="bg-green-50 border border-green-200 rounded-xl px-5 py-3 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Check className="w-4 h-4 text-green-500 shrink-0" />
+                        <div>
+                          <p className="text-sm text-gray-800">
+                            <span className="font-medium">{isMe ? 'You' : fromName}</span>
+                            {' paid '}
+                            <span className="font-medium">{s.to_user_id === user.id ? 'you' : toName}</span>
+                          </p>
+                          <p className="text-xs text-gray-400">{date}</p>
+                        </div>
+                      </div>
+                      <span className="font-semibold text-green-700 text-sm">{formatINR(s.amount)}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
           )}
         </div>
       )}
