@@ -187,8 +187,15 @@ export default function GroupDetail() {
   async function settleTransaction(fromId, toId, amount, idx) {
     setSettlingIdx(idx)
     const groupExpenseIds = expenses.map(e => e.id)
-    const splitsToSettle = splits.filter(
-      s => s.user_id === fromId && groupExpenseIds.includes(s.expense_id) && !s.settled
+    const expensesPaidByFrom = expenses.filter(e => e.paid_by === fromId).map(e => e.id)
+
+    // Settle fromId's own splits AND toId's counter-debts on fromId's expenses
+    // (the simplified net payment already accounts for both sides)
+    const splitsToSettle = splits.filter(s =>
+      !s.settled && groupExpenseIds.includes(s.expense_id) && (
+        s.user_id === fromId ||
+        (s.user_id === toId && expensesPaidByFrom.includes(s.expense_id))
+      )
     )
     if (splitsToSettle.length > 0) {
       const ids = splitsToSettle.map(s => s.id)
