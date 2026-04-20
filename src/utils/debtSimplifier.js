@@ -44,21 +44,27 @@ export function simplifyDebts(balances) {
 
 /**
  * Compute net balance per member from a list of expenses + splits.
+ * Only unsettled splits contribute to balances.
  * Returns { userId: netBalance }
  */
-export function computeBalances(expenses, splits, currentUserId) {
+export function computeBalances(expenses, splits) {
   const balances = {}
 
+  const expensePayer = {}
   for (const expense of expenses) {
-    const paidBy = expense.paid_by
-    if (!(paidBy in balances)) balances[paidBy] = 0
-    balances[paidBy] += Number(expense.amount)
+    expensePayer[expense.id] = expense.paid_by
+    if (!(expense.paid_by in balances)) balances[expense.paid_by] = 0
   }
 
   for (const split of splits) {
+    if (split.settled) continue
     const uid = split.user_id
+    const payerId = expensePayer[split.expense_id]
+    if (!payerId) continue
     if (!(uid in balances)) balances[uid] = 0
+    if (!(payerId in balances)) balances[payerId] = 0
     balances[uid] -= Number(split.amount)
+    balances[payerId] += Number(split.amount)
   }
 
   return balances

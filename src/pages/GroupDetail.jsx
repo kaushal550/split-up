@@ -208,7 +208,7 @@ export default function GroupDetail() {
   }
 
   // Compute balances for settle up tab
-  const balances = computeBalances(expenses, splits, user.id)
+  const balances = computeBalances(expenses, splits)
   const transactions = simplifyDebts(balances)
 
   const memberList = members.map(m => ({ ...m, profile: profiles[m.user_id] }))
