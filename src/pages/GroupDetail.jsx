@@ -34,6 +34,7 @@ export default function GroupDetail() {
   const [memberEmail, setMemberEmail] = useState('')
   const [addingMember, setAddingMember] = useState(false)
   const [memberError, setMemberError] = useState('')
+  const [settlingIdx, setSettlingIdx] = useState(null)
 
   useEffect(() => { if (user && id) loadAll() }, [user, id])
 
@@ -171,6 +172,23 @@ export default function GroupDetail() {
   async function markSettled(splitId) {
     await supabase.from('expense_splits').update({ settled: true, settled_at: new Date().toISOString() }).eq('id', splitId)
     setSplits(prev => prev.map(s => s.id === splitId ? { ...s, settled: true } : s))
+  }
+
+  async function settleTransaction(fromId, toId, idx) {
+    setSettlingIdx(idx)
+    // Find all unsettled splits where fromId owes toId (toId paid the expense)
+    const expensesPaidByTo = expenses.filter(e => e.paid_by === toId).map(e => e.id)
+    const splitsToSettle = splits.filter(
+      s => s.user_id === fromId && expensesPaidByTo.includes(s.expense_id) && !s.settled
+    )
+    if (splitsToSettle.length > 0) {
+      const ids = splitsToSettle.map(s => s.id)
+      await supabase.from('expense_splits')
+        .update({ settled: true, settled_at: new Date().toISOString() })
+        .in('id', ids)
+      setSplits(prev => prev.map(s => ids.includes(s.id) ? { ...s, settled: true } : s))
+    }
+    setSettlingIdx(null)
   }
 
   // Compute balances for settle up tab
@@ -338,11 +356,11 @@ export default function GroupDetail() {
                   const isMe = t.from === user.id
 
                   return (
-                    <div key={i} className={`rounded-xl border px-5 py-4 flex items-center justify-between ${
+                    <div key={i} className={`rounded-xl border px-5 py-4 flex items-center justify-between gap-3 ${
                       isMe ? 'bg-red-50 border-red-200' : 'bg-white border-gray-200'
                     }`}>
-                      <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <div className="flex items-center gap-2 shrink-0">
                           <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-700 font-semibold text-xs">
                             {fromName[0].toUpperCase()}
                           </div>
@@ -351,7 +369,7 @@ export default function GroupDetail() {
                             {toName[0].toUpperCase()}
                           </div>
                         </div>
-                        <div>
+                        <div className="min-w-0">
                           <p className="text-sm font-medium text-gray-900">
                             <span className={isMe ? 'text-red-700' : ''}>{fromName}</span>
                             {' '}pays{' '}
@@ -360,7 +378,18 @@ export default function GroupDetail() {
                           {isMe && <p className="text-xs text-red-500">You need to pay this</p>}
                         </div>
                       </div>
-                      <span className="font-bold text-gray-900 text-base">{formatINR(t.amount)}</span>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <span className="font-bold text-gray-900 text-base">{formatINR(t.amount)}</span>
+                        {isMe && (
+                          <button
+                            onClick={() => settleTransaction(t.from, t.to, i)}
+                            disabled={settlingIdx === i}
+                            className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-60 text-white rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
+                          >
+                            {settlingIdx === i ? 'Settling…' : 'Mark paid'}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   )
                 })}
