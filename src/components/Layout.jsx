@@ -19,8 +19,9 @@ export default function Layout({ children }) {
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
-      {/* Sidebar */}
-      <aside className="w-64 bg-white border-r border-gray-200 flex flex-col fixed h-full">
+
+      {/* Sidebar — desktop only */}
+      <aside className="hidden md:flex w-64 bg-white border-r border-gray-200 flex-col fixed h-full z-10">
         <div className="px-6 py-5 border-b border-gray-100 flex items-center gap-2">
           <SplitSquareVertical className="text-teal-600 w-6 h-6" />
           <span className="font-bold text-gray-900 text-lg">SplitUp</span>
@@ -66,9 +67,50 @@ export default function Layout({ children }) {
       </aside>
 
       {/* Main content */}
-      <main className="ml-64 flex-1 p-8">
+      <main className="flex-1 md:ml-64 p-4 md:p-8 pb-24 md:pb-8 min-w-0">
+        {/* Mobile top bar */}
+        <div className="flex md:hidden items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <SplitSquareVertical className="text-teal-600 w-5 h-5" />
+            <span className="font-bold text-gray-900">SplitUp</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-full bg-teal-100 flex items-center justify-center text-teal-700 font-semibold text-xs">
+              {profile?.name?.[0]?.toUpperCase() ?? '?'}
+            </div>
+            <button onClick={handleSignOut} className="text-gray-400 hover:text-red-500 p-1">
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
         {children}
       </main>
+
+      {/* Bottom nav — mobile only */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-10">
+        <div className="flex">
+          {navItems.map(({ to, icon: Icon, label }) => (
+            <NavLink
+              key={to}
+              to={to}
+              className={({ isActive }) =>
+                `flex-1 flex flex-col items-center gap-0.5 py-3 text-xs font-medium transition-colors ${
+                  isActive ? 'text-teal-600' : 'text-gray-400'
+                }`
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  <Icon className={`w-5 h-5 ${isActive ? 'text-teal-600' : 'text-gray-400'}`} />
+                  {label}
+                </>
+              )}
+            </NavLink>
+          ))}
+        </div>
+      </nav>
+
     </div>
   )
 }
