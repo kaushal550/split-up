@@ -292,27 +292,57 @@ export default function GroupDetail() {
       {/* Expenses tab */}
       {tab === 'Expenses' && (
         <div className="space-y-2">
-          {expenses.length === 0 ? (
+          {expenses.length === 0 && settlements.length === 0 ? (
             <div className="text-center py-16 bg-white border border-dashed border-gray-300 rounded-xl">
               <p className="text-gray-500">No expenses yet</p>
               <button onClick={openAddExpense} className="mt-2 text-teal-600 text-sm font-medium hover:underline">
                 Add the first expense
               </button>
             </div>
-          ) : expenses.map(exp => {
-            const payer = profiles[exp.paid_by]
-            const expSplits = splits.filter(s => s.expense_id === exp.id)
-            return (
-              <ExpenseRow
-                key={exp.id}
-                expense={exp}
-                payer={payer}
-                splits={expSplits}
-                profiles={profiles}
-                currentUserId={user.id}
-              />
-            )
-          })}
+          ) : (
+            [
+              ...expenses.map(e => ({ type: 'expense', date: e.date + 'T00:00:00', data: e })),
+              ...settlements.map(s => ({ type: 'settlement', date: s.created_at, data: s })),
+            ]
+              .sort((a, b) => new Date(b.date) - new Date(a.date))
+              .map(item => {
+                if (item.type === 'expense') {
+                  const exp = item.data
+                  return (
+                    <ExpenseRow
+                      key={'exp-' + exp.id}
+                      expense={exp}
+                      payer={profiles[exp.paid_by]}
+                      splits={splits.filter(s => s.expense_id === exp.id)}
+                      profiles={profiles}
+                      currentUserId={user.id}
+                    />
+                  )
+                }
+                const s = item.data
+                const fromName = profiles[s.from_user_id]?.name ?? profiles[s.from_user_id]?.email ?? 'Unknown'
+                const toName = profiles[s.to_user_id]?.name ?? profiles[s.to_user_id]?.email ?? 'Unknown'
+                const isFromMe = s.from_user_id === user.id
+                const isToMe = s.to_user_id === user.id
+                const date = new Date(s.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+                return (
+                  <div key={'settle-' + s.id} className="bg-green-50 border border-green-200 rounded-xl px-4 py-3.5 flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-lg bg-green-100 flex items-center justify-center shrink-0">
+                      <Check className="w-4 h-4 text-green-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900">
+                        <span>{isFromMe ? 'You' : fromName}</span>
+                        <span className="text-gray-500 font-normal"> paid </span>
+                        <span>{isToMe ? 'you' : toName}</span>
+                      </p>
+                      <p className="text-xs text-gray-400">{date}</p>
+                    </div>
+                    <span className="font-semibold text-green-700 text-sm shrink-0">{formatINR(s.amount)}</span>
+                  </div>
+                )
+              })
+          )}
         </div>
       )}
 
