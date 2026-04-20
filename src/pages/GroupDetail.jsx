@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Plus, UserPlus, X, Check, ChevronDown, ChevronUp, ArrowRight } from 'lucide-react'
+import { ArrowLeft, Plus, UserPlus, X, Check, ChevronDown, ChevronUp, ArrowRight, Pencil, Trash2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { simplifyDebts, computeBalances, formatINR } from '../utils/debtSimplifier'
@@ -28,6 +28,7 @@ export default function GroupDetail() {
   const [splitMode, setSplitMode] = useState('equal')
   const [selectedMembers, setSelectedMembers] = useState({})
   const [saving, setSaving] = useState(false)
+  const [editingExpense, setEditingExpense] = useState(null)
 
   // Add member modal state
   const [showAddMember, setShowAddMember] = useState(false)
@@ -119,36 +120,62 @@ export default function GroupDetail() {
     return active.reduce((acc, id) => { acc[id] = each; return acc }, {})
   }
 
+  function openEditExpense(expense) {
+    const expSplits = splits.filter(s => s.expense_id === expense.id)
+    const selMembers = {}
+    const custSplits = {}
+    members.forEach(m => { selMembers[m.user_id] = false })
+    expSplits.forEach(s => { selMembers[s.user_id] = true; custSplits[s.user_id] = s.amount })
+    setEditingExpense(expense)
+    setExpForm({ description: expense.description, amount: expense.amount, date: expense.date, paidBy: expense.paid_by })
+    setSplitMode('custom')
+    setCustomSplits(custSplits)
+    setSelectedMembers(selMembers)
+    setShowAddExp(true)
+  }
+
   async function addExpense() {
     const amount = Number(expForm.amount)
     if (!expForm.description.trim() || !amount || amount <= 0) return
     setSaving(true)
 
-    const { data: expense, error } = await supabase.from('expenses').insert({
-      group_id: id,
-      paid_by: expForm.paidBy,
-      amount,
-      description: expForm.description.trim(),
-      date: expForm.date,
-      category: 'Group',
-    }).select().single()
+    const splitsPayload = splitMode === 'equal'
+      ? Object.entries(getEqualSplit(amount)).map(([userId, amt]) => ({ user_id: userId, amount: amt, settled: false }))
+      : Object.entries(customSplits).filter(([, amt]) => Number(amt) > 0).map(([userId, amt]) => ({ user_id: userId, amount: Number(amt), settled: false }))
 
-    if (!error && expense) {
-      const splitsToInsert = splitMode === 'equal'
-        ? Object.entries(getEqualSplit(amount)).map(([userId, amt]) => ({
-            expense_id: expense.id, user_id: userId, amount: amt, settled: false,
-          }))
-        : Object.entries(customSplits)
-            .filter(([, amt]) => Number(amt) > 0)
-            .map(([userId, amt]) => ({
-              expense_id: expense.id, user_id: userId, amount: Number(amt), settled: false,
-            }))
-
-      await supabase.from('expense_splits').insert(splitsToInsert)
-      setShowAddExp(false)
-      await loadExpensesAndSplits()
+    if (editingExpense) {
+      await supabase.from('expenses').update({
+        paid_by: expForm.paidBy, amount, description: expForm.description.trim(), date: expForm.date,
+      }).eq('id', editingExpense.id)
+      await supabase.from('expense_splits').delete().eq('expense_id', editingExpense.id)
+      await supabase.from('expense_splits').insert(splitsPayload.map(s => ({ ...s, expense_id: editingExpense.id })))
+    } else {
+      const { data: expense, error } = await supabase.from('expenses').insert({
+        group_id: id, paid_by: expForm.paidBy, amount, description: expForm.description.trim(), date: expForm.date, category: 'Group',
+      }).select().single()
+      if (!error && expense) {
+        await supabase.from('expense_splits').insert(splitsPayload.map(s => ({ ...s, expense_id: expense.id })))
+      }
     }
+
+    setShowAddExp(false)
+    setEditingExpense(null)
+    await loadExpensesAndSplits()
     setSaving(false)
+  }
+
+  async function deleteExpense(expenseId) {
+    if (!window.confirm('Delete this expense? This cannot be undone.')) return
+    await supabase.from('expense_splits').delete().eq('expense_id', expenseId)
+    await supabase.from('expenses').delete().eq('id', expenseId)
+    setExpenses(prev => prev.filter(e => e.id !== expenseId))
+    setSplits(prev => prev.filter(s => s.expense_id !== expenseId))
+  }
+
+  async function deleteGroup() {
+    if (!window.confirm(`Delete "${group.name}"? All expenses and data will be permanently removed.`)) return
+    await supabase.from('groups').delete().eq('id', id)
+    navigate('/groups')
   }
 
   async function addMember() {
@@ -262,6 +289,14 @@ export default function GroupDetail() {
           >
             <Plus className="w-4 h-4" /> Add expense
           </button>
+          {isCreator && (
+            <button
+              onClick={deleteGroup}
+              className="flex items-center gap-1.5 px-3 py-2 border border-red-200 text-red-500 hover:bg-red-50 rounded-lg text-sm font-medium transition-colors"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -323,6 +358,8 @@ export default function GroupDetail() {
                       splits={splits.filter(s => s.expense_id === exp.id)}
                       profiles={profiles}
                       currentUserId={user.id}
+                      onEdit={openEditExpense}
+                      onDelete={deleteExpense}
                     />
                   )
                 }
@@ -490,8 +527,8 @@ export default function GroupDetail() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="font-semibold text-gray-900">Add group expense</h2>
-              <button onClick={() => setShowAddExp(false)} className="text-gray-400 hover:text-gray-600">
+              <h2 className="font-semibold text-gray-900">{editingExpense ? 'Edit expense' : 'Add group expense'}</h2>
+              <button onClick={() => { setShowAddExp(false); setEditingExpense(null) }} className="text-gray-400 hover:text-gray-600">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -650,7 +687,7 @@ export default function GroupDetail() {
 
             <div className="flex gap-2 mt-5">
               <button
-                onClick={() => setShowAddExp(false)}
+                onClick={() => { setShowAddExp(false); setEditingExpense(null) }}
                 className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50"
               >
                 Cancel
@@ -660,7 +697,7 @@ export default function GroupDetail() {
                 disabled={saving || !expForm.description.trim() || !expForm.amount}
                 className="flex-1 px-4 py-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-60 text-white rounded-lg text-sm font-medium"
               >
-                {saving ? 'Saving…' : 'Add expense'}
+                {saving ? 'Saving…' : editingExpense ? 'Save changes' : 'Add expense'}
               </button>
             </div>
           </div>
@@ -707,7 +744,7 @@ export default function GroupDetail() {
   )
 }
 
-function ExpenseRow({ expense, payer, splits, profiles, currentUserId }) {
+function ExpenseRow({ expense, payer, splits, profiles, currentUserId, onEdit, onDelete }) {
   const [open, setOpen] = useState(false)
   const mySplit = splits.find(s => s.user_id === currentUserId)
   const payerName = payer?.name ?? payer?.email ?? 'Unknown'
@@ -749,7 +786,7 @@ function ExpenseRow({ expense, payer, splits, profiles, currentUserId }) {
       {open && (
         <div className="px-4 pb-4 border-t border-gray-100 pt-3">
           <p className="text-xs font-medium text-gray-500 mb-2">Split details</p>
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 mb-3">
             {splits.map(s => {
               const p = profiles[s.user_id]
               const name = p?.name ?? p?.email ?? 'Unknown'
@@ -765,6 +802,20 @@ function ExpenseRow({ expense, payer, splits, profiles, currentUserId }) {
                 </div>
               )
             })}
+          </div>
+          <div className="flex gap-2 pt-2 border-t border-gray-100">
+            <button
+              onClick={() => onEdit(expense)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              <Pencil className="w-3.5 h-3.5" /> Edit
+            </button>
+            <button
+              onClick={() => onDelete(expense.id)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-500 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+            >
+              <Trash2 className="w-3.5 h-3.5" /> Delete
+            </button>
           </div>
         </div>
       )}
